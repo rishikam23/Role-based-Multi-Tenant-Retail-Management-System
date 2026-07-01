@@ -1,0 +1,84 @@
+"use client";
+
+import { useState } from "react";
+import { createSuperAdmin } from "../actions";
+import { Button } from "@/components/ui/button";
+import { Input } from "@/components/ui/input";
+import { Label } from "@/components/ui/label";
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+  DialogTrigger,
+} from "@/components/ui/dialog";
+
+export function CreateSuperAdminModal({ tenantId, companyName }: { tenantId: number, companyName: string }) {
+  const [open, setOpen] = useState(false);
+  const [error, setError] = useState("");
+  const [loading, setLoading] = useState(false);
+
+  async function handleSubmit(formData: FormData) {
+    setLoading(true);
+    setError("");
+    formData.append("tenantId", tenantId.toString());
+
+    const result = await createSuperAdmin(formData);
+
+    if (result.error) {
+      setError(result.error);
+    } else {
+      setOpen(false);
+    }
+    setLoading(false);
+  }
+
+  return (
+    <Dialog open={open} onOpenChange={setOpen}>
+      <DialogTrigger asChild>
+        <Button variant="outline" size="sm">Add Admin</Button>
+      </DialogTrigger>
+      <DialogContent className="sm:max-w-[425px]">
+        <DialogHeader>
+          <DialogTitle>Admin Setup: {companyName}</DialogTitle>
+          <DialogDescription>
+            Create the primary Super Admin account for this organization.
+          </DialogDescription>
+        </DialogHeader>
+
+        <form action={handleSubmit} className="space-y-4 pt-4">
+          {error && <p className="text-sm text-red-600 bg-red-50 p-3 rounded">{error}</p>}
+          
+          <div className="grid grid-cols-2 gap-4">
+            <div className="grid gap-2">
+              <Label htmlFor="firstName">First Name</Label>
+              <Input id="firstName" name="firstName" required />
+            </div>
+            <div className="grid gap-2">
+              <Label htmlFor="lastName">Last Name</Label>
+              <Input id="lastName" name="lastName" required />
+            </div>
+          </div>
+
+          <div className="grid gap-2">
+            <Label htmlFor="email">Email Address</Label>
+            <Input id="email" name="email" type="email" required />
+          </div>
+
+          <div className="grid gap-2">
+            <Label htmlFor="password">Temporary Password</Label>
+            <Input id="password" name="password" type="password" required />
+          </div>
+
+          <DialogFooter className="pt-4">
+            <Button type="submit" disabled={loading}>
+              {loading ? "Creating..." : "Create Account"}
+            </Button>
+          </DialogFooter>
+        </form>
+      </DialogContent>
+    </Dialog>
+  );
+}

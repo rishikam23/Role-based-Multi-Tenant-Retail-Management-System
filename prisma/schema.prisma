@@ -1,0 +1,574 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+enum UserType {
+  master_admin
+  super_admin
+  member
+}
+
+enum LocationType {
+  store
+  branch
+  depot
+  kiosk
+}
+
+enum ProductType {
+  physical
+  service
+  digital
+}
+
+enum MovementType {
+  purchase_receipt
+  sale
+  adjustment_in
+  adjustment_out
+  transfer_out
+  transfer_in
+  return_from_customer
+  return_to_supplier
+  opening_stock
+}
+
+enum PurchaseOrderStatus {
+  draft
+  submitted
+  approved
+  partially_received
+  received
+  cancelled
+}
+
+enum SaleStatus {
+  draft
+  confirmed
+  partially_returned
+  returned
+  cancelled
+}
+
+enum PaymentMethod {
+  cash
+  card
+  bank_transfer
+  mobile_money
+  credit
+  mixed
+}
+
+enum ReturnStatus {
+  pending
+  approved
+  rejected
+  completed
+}
+
+enum TransferStatus {
+  draft
+  in_transit
+  received
+  cancelled
+}
+
+enum AuditUserType {
+  master_admin
+  super_admin
+  member
+  system
+}
+
+model MasterAdmin {
+  id           Int       @id @default(autoincrement())
+  fullName     String    @db.VarChar(150)
+  email        String    @unique @db.VarChar(191)
+  username     String    @unique @default("admin") @db.VarChar(100)
+  passwordHash String
+  isActive     Boolean   @default(true)
+  createdAt    DateTime  @default(now())
+
+  tenants      Tenant[]
+
+  @@map("master_admin")
+}
+
+model Tenant {
+  id             Int       @id @default(autoincrement())
+  tenantCode     String    @unique @db.VarChar(32)
+  companyName    String    @db.VarChar(255)
+  email          String?   @db.VarChar(191)
+  phone          String?   @db.VarChar(30)
+  timezone       String    @default("UTC") @db.VarChar(80)
+  currencyCode   String    @default("USD") @db.VarChar(10)
+  currencySymbol String    @default("$") @db.VarChar(10)
+  isActive       Boolean   @default(true)
+  managedById    Int?
+  createdAt      DateTime  @default(now())
+
+  managedBy           MasterAdmin?          @relation(fields: [managedById], references: [id], onDelete: SetNull)
+  roles               Role[]
+  users               User[]
+  locations           Location[]
+  suppliers           Supplier[]
+  categories          Category[]
+  unitsOfMeasures     UnitOfMeasure[]
+  products            Product[]
+  stockLedger         StockLedger[]
+  stockMovements      StockMovement[]
+  purchaseOrders      PurchaseOrder[]
+  purchaseOrderItems  PurchaseOrderItem[]
+  customers           Customer[]
+  salesOrders         SalesOrder[]
+  salesOrderItems     SalesOrderItem[]
+  salesReturns        SalesReturn[]
+  userSessions        UserSession[]
+  stockTransfers      StockTransfer[]
+  eodCashUps          EodCashUp[]
+
+  @@map("tenants")
+}
+
+model Permission {
+  id          Int    @id @default(autoincrement())
+  module      String @db.VarChar(80)
+  action      String @db.VarChar(80)
+  displayName String @db.VarChar(150)
+
+  rolePermissions RolePermission[]
+
+  @@unique([module, action])
+  @@map("permissions")
+}
+
+model Role {
+  id        Int      @id @default(autoincrement())
+  tenantId  Int
+  roleName  String   @db.VarChar(100)
+  isSystem  Boolean  @default(false)
+  isActive  Boolean  @default(true)
+  createdAt DateTime @default(now())
+
+  tenant          Tenant           @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  users           User[]
+  rolePermissions RolePermission[]
+
+  @@unique([tenantId, roleName])
+  @@map("roles")
+}
+
+model RolePermission {
+  id           Int      @id @default(autoincrement())
+  roleId       Int
+  permissionId Int
+  grantedAt    DateTime @default(now())
+
+  role       Role       @relation(fields: [roleId], references: [id], onDelete: Cascade)
+  permission Permission @relation(fields: [permissionId], references: [id], onDelete: Cascade)
+
+  @@unique([roleId, permissionId])
+  @@map("role_permissions")
+}
+
+model User {
+  id           Int      @id @default(autoincrement())
+  tenantId     Int?
+  roleId       Int?
+  userType     UserType @default(member)
+  firstName    String   @db.VarChar(100)
+  lastName     String   @db.VarChar(100)
+  username     String   @db.VarChar(100)
+  email        String   @unique @db.VarChar(191)
+  phone        String?  @db.VarChar(30)
+  passwordHash String
+  isActive     Boolean  @default(true)
+  createdAt    DateTime @default(now())
+
+  tenant   Tenant? @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  role     Role?   @relation(fields: [roleId], references: [id], onDelete: SetNull)
+
+  sessions              UserSession[]
+  locationAccess        UserLocationAccess[]
+  stockMovementsBy      StockMovement[]      @relation("PerformedBy")
+  purchaseOrdersCreated PurchaseOrder[]      @relation("CreatedBy")
+  salesOrdersCashier    SalesOrder[]         @relation("Cashier")
+  salesReturnsProcessed SalesReturn[]        @relation("ProcessedBy")
+  stockTransfersCreated StockTransfer[]      @relation("TransferCreatedBy")
+  eodCashUps           EodCashUp[]          @relation("CashUpCashier")
+
+  @@unique([tenantId, username])
+  @@map("users")
+}
+
+model UserSession {
+  id        Int       @id @default(autoincrement())
+  userId    Int
+  tenantId  Int?
+  tokenHash String    @unique @db.VarChar(128)
+  expiresAt DateTime
+  revokedAt DateTime?
+  createdAt DateTime  @default(now())
+
+  user   User    @relation(fields: [userId], references: [id], onDelete: Cascade)
+  tenant Tenant? @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+
+  @@map("user_sessions")
+}
+
+model Location {
+  id           Int          @id @default(autoincrement())
+  tenantId     Int
+  locationCode String       @db.VarChar(30)
+  locationName String       @db.VarChar(200)
+  locationType LocationType @default(store)
+  isActive     Boolean      @default(true)
+  createdAt    DateTime     @default(now())
+
+  tenant Tenant @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+
+  userLocationAccess    UserLocationAccess[]
+  stockLedger           StockLedger[]
+  stockMovementsFrom    StockMovement[]      @relation("FromLocation")
+  stockMovementsTo      StockMovement[]      @relation("ToLocation")
+  purchaseOrders        PurchaseOrder[]
+  salesOrders           SalesOrder[]
+  stockTransfersFrom    StockTransfer[]      @relation("TransferFrom")
+  stockTransfersTo      StockTransfer[]      @relation("TransferTo")
+  eodCashUps           EodCashUp[]
+
+  @@unique([tenantId, locationCode])
+  @@map("locations")
+}
+
+model UserLocationAccess {
+  id         Int      @id @default(autoincrement())
+  userId     Int
+  locationId Int
+  grantedAt  DateTime @default(now())
+
+  user     User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  location Location @relation(fields: [locationId], references: [id], onDelete: Cascade)
+
+  @@unique([userId, locationId])
+  @@map("user_location_access")
+}
+
+model Supplier {
+  id            Int      @id @default(autoincrement())
+  tenantId      Int
+  supplierName  String   @db.VarChar(255)
+  contactPerson String?  @db.VarChar(150)
+  email         String?  @db.VarChar(191)
+  phone         String?  @db.VarChar(30)
+  isActive      Boolean  @default(true)
+  createdAt     DateTime @default(now())
+
+  tenant         Tenant          @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  purchaseOrders PurchaseOrder[]
+
+  @@map("suppliers")
+}
+
+model Category {
+  id           Int      @id @default(autoincrement())
+  tenantId     Int
+  parentId     Int?
+  categoryName String   @db.VarChar(200)
+  isActive     Boolean  @default(true)
+  createdAt    DateTime @default(now())
+
+  tenant   Tenant     @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  parent   Category?  @relation("CategoryParent", fields: [parentId], references: [id], onDelete: SetNull)
+  children Category[] @relation("CategoryParent")
+  products Product[]
+
+  @@map("categories")
+}
+
+model UnitOfMeasure {
+  id        Int     @id @default(autoincrement())
+  tenantId  Int
+  uomCode   String  @db.VarChar(20)
+  uomName   String  @db.VarChar(100)
+  isActive  Boolean @default(true)
+
+  tenant   Tenant    @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  products Product[]
+
+  @@unique([tenantId, uomCode])
+  @@map("units_of_measures")
+}
+
+model Product {
+  id           Int         @id @default(autoincrement())
+  tenantId     Int
+  categoryId   Int?
+  uomId        Int?
+  sku          String      @db.VarChar(100)
+  productName  String      @db.VarChar(255)
+  productType  ProductType @default(physical)
+  costPrice    Decimal     @default(0) @db.Decimal(15, 4)
+  sellingPrice Decimal     @default(0) @db.Decimal(15, 4)
+  reorderLevel Int         @default(0)
+  isActive     Boolean     @default(true)
+  createdAt    DateTime    @default(now())
+
+  tenant   Tenant         @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  category Category?      @relation(fields: [categoryId], references: [id], onDelete: SetNull)
+  uom      UnitOfMeasure? @relation(fields: [uomId], references: [id], onDelete: SetNull)
+
+  stockLedger        StockLedger[]
+  stockMovements     StockMovement[]
+  purchaseOrderItems PurchaseOrderItem[]
+  salesOrderItems    SalesOrderItem[]
+  stockTransferItems StockTransferItem[]
+
+  @@unique([tenantId, sku])
+  @@map("products")
+}
+
+model StockLedger {
+  id          Int      @id @default(autoincrement())
+  tenantId    Int
+  locationId  Int
+  productId   Int
+  batchNo     String?  @db.VarChar(100)
+  quantity    Decimal  @default(0) @db.Decimal(15, 4)
+  costPrice   Decimal  @default(0) @db.Decimal(15, 4)
+  lastUpdated DateTime @default(now()) @updatedAt
+
+  tenant   Tenant   @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  location Location @relation(fields: [locationId], references: [id], onDelete: Cascade)
+  product  Product  @relation(fields: [productId], references: [id], onDelete: Cascade)
+
+  @@unique([tenantId, locationId, productId, batchNo])
+  @@map("stock_ledger")
+}
+
+model StockMovement {
+  id             Int          @id @default(autoincrement())
+  tenantId       Int
+  movementType   MovementType
+  referenceType  String?      @db.VarChar(60)
+  referenceId    Int?
+  fromLocationId Int?
+  toLocationId   Int?
+  productId      Int
+  quantity       Decimal      @db.Decimal(15, 4)
+  performedById  Int
+  performedAt    DateTime     @default(now())
+
+  tenant       Tenant    @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  product      Product   @relation(fields: [productId], references: [id], onDelete: Cascade)
+  performedBy  User      @relation("PerformedBy", fields: [performedById], references: [id])
+  fromLocation Location? @relation("FromLocation", fields: [fromLocationId], references: [id])
+  toLocation   Location? @relation("ToLocation", fields: [toLocationId], references: [id])
+
+  @@map("stock_movements")
+}
+
+model PurchaseOrder {
+  id                   Int                 @id @default(autoincrement())
+  tenantId             Int
+  poNumber             String              @db.VarChar(50)
+  supplierId           Int
+  receivingLocationId  Int
+  orderDate            DateTime            @db.Date
+  status               PurchaseOrderStatus @default(draft)
+  subtotal             Decimal             @default(0) @db.Decimal(15, 4)
+  discountAmount       Decimal             @default(0) @db.Decimal(15, 4)
+  grandTotal           Decimal             @default(0) @db.Decimal(15, 4)
+  createdById          Int
+  createdAt            DateTime            @default(now())
+
+  tenant            Tenant              @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  supplier          Supplier            @relation(fields: [supplierId], references: [id])
+  receivingLocation Location            @relation(fields: [receivingLocationId], references: [id])
+  createdBy         User                @relation("CreatedBy", fields: [createdById], references: [id])
+  items             PurchaseOrderItem[]
+
+  @@unique([tenantId, poNumber])
+  @@map("purchase_orders")
+}
+
+model PurchaseOrderItem {
+  id          Int     @id @default(autoincrement())
+  poId        Int
+  tenantId    Int
+  productId   Int
+  orderedQty  Decimal @db.Decimal(15, 4)
+  receivedQty Decimal @default(0) @db.Decimal(15, 4)
+  unitCost    Decimal @db.Decimal(15, 4)
+  lineTotal   Decimal @db.Decimal(15, 4)
+
+  purchaseOrder PurchaseOrder @relation(fields: [poId], references: [id], onDelete: Cascade)
+  tenant        Tenant        @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  product       Product       @relation(fields: [productId], references: [id])
+
+  @@map("purchase_order_items")
+}
+
+model Customer {
+  id        Int      @id @default(autoincrement())
+  tenantId  Int
+  fullName  String   @db.VarChar(255)
+  email     String?  @db.VarChar(191)
+  phone     String?  @db.VarChar(30)
+  isActive  Boolean  @default(true)
+  createdAt DateTime @default(now())
+
+  tenant      Tenant       @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  salesOrders SalesOrder[]
+
+  @@map("customers")
+}
+
+model SalesOrder {
+  id             Int           @id @default(autoincrement())
+  tenantId       Int
+  invoiceNo      String        @db.VarChar(60)
+  locationId     Int
+  customerId     Int?
+  cashierId      Int
+  saleDate       DateTime      @default(now())
+  status         SaleStatus    @default(confirmed)
+  paymentMethod  PaymentMethod @default(cash)
+  subtotal       Decimal       @default(0) @db.Decimal(15, 4)
+  discountAmount Decimal       @default(0) @db.Decimal(15, 4)
+  grandTotal     Decimal       @default(0) @db.Decimal(15, 4)
+  createdAt      DateTime      @default(now())
+
+  tenant   Tenant    @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  location Location  @relation(fields: [locationId], references: [id])
+  customer Customer? @relation(fields: [customerId], references: [id], onDelete: SetNull)
+  cashier  User      @relation("Cashier", fields: [cashierId], references: [id])
+
+  items   SalesOrderItem[]
+  returns SalesReturn[]
+
+  @@unique([tenantId, invoiceNo])
+  @@map("sales_orders")
+}
+
+model SalesOrderItem {
+  id           Int     @id @default(autoincrement())
+  salesOrderId Int
+  tenantId     Int
+  productId    Int
+  quantity     Decimal @db.Decimal(15, 4)
+  unitPrice    Decimal @db.Decimal(15, 4)
+  discount     Decimal @default(0) @db.Decimal(15, 4)
+  lineTotal    Decimal @db.Decimal(15, 4)
+
+  salesOrder SalesOrder @relation(fields: [salesOrderId], references: [id], onDelete: Cascade)
+  tenant     Tenant     @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  product    Product    @relation(fields: [productId], references: [id])
+
+  @@map("sales_order_items")
+}
+
+model SalesReturn {
+  id             Int          @id @default(autoincrement())
+  tenantId       Int
+  salesOrderId   Int
+  returnNo       String       @db.VarChar(60)
+  returnDate     DateTime     @default(now())
+  returnReason   String?      @db.VarChar(255)
+  totalRefunded  Decimal      @default(0) @db.Decimal(15, 4)
+  status         ReturnStatus @default(pending)
+  processedById  Int
+  createdAt      DateTime     @default(now())
+
+  tenant      Tenant     @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  salesOrder  SalesOrder @relation(fields: [salesOrderId], references: [id])
+  processedBy User       @relation("ProcessedBy", fields: [processedById], references: [id])
+
+  @@unique([tenantId, returnNo])
+  @@map("sales_returns")
+}
+
+model StockTransfer {
+  id             Int            @id @default(autoincrement())
+  tenantId       Int
+  transferNo     String         @db.VarChar(60)
+  fromLocationId Int
+  toLocationId   Int
+  transferDate   DateTime       @db.Date
+  status         TransferStatus @default(draft)
+  createdById    Int
+  createdAt      DateTime       @default(now())
+
+  tenant       Tenant              @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  fromLocation Location            @relation("TransferFrom", fields: [fromLocationId], references: [id])
+  toLocation   Location            @relation("TransferTo", fields: [toLocationId], references: [id])
+  createdBy    User                @relation("TransferCreatedBy", fields: [createdById], references: [id])
+  items        StockTransferItem[]
+
+  @@unique([tenantId, transferNo])
+  @@map("stock_transfers")
+}
+
+model StockTransferItem {
+  id           Int      @id @default(autoincrement())
+  transferId   Int
+  productId    Int
+  requestedQty Decimal  @db.Decimal(15, 4)
+  dispatchedQty Decimal? @db.Decimal(15, 4)
+  receivedQty  Decimal? @db.Decimal(15, 4)
+
+  transfer StockTransfer @relation(fields: [transferId], references: [id], onDelete: Cascade)
+  product  Product       @relation(fields: [productId], references: [id])
+
+  @@map("stock_transfer_items")
+}
+
+model AuditLog {
+  id        Int           @id @default(autoincrement())
+  tenantId  Int?
+  userId    Int?
+  userType  AuditUserType @default(member)
+  action    String        @db.VarChar(80)
+  entity    String        @db.VarChar(80)
+  entityId  Int?
+  oldValues Json?
+  newValues Json?
+  createdAt DateTime      @default(now())
+
+  @@map("audit_logs")
+}
+
+model EodCashUp {
+  id                 Int      @id @default(autoincrement())
+  tenantId           Int
+  locationId         Int
+  cashierId          Int
+  date               DateTime @db.Date
+  openingBalance     Decimal  @db.Decimal(15, 4)
+  cashSales          Decimal  @db.Decimal(15, 4)
+  momoSales          Decimal  @db.Decimal(15, 4)
+  cardSales          Decimal  @db.Decimal(15, 4)
+  pettyCashIn        Decimal  @db.Decimal(15, 4) @default(0)
+  pettyCashOut       Decimal  @db.Decimal(15, 4) @default(0)
+  pettyCashNotes     String?  @db.VarChar(255)
+  refunds            Decimal  @db.Decimal(15, 4) @default(0)
+  expectedClosing    Decimal  @db.Decimal(15, 4)
+  actualClosing      Decimal  @db.Decimal(15, 4)
+  discrepancy        Decimal  @db.Decimal(15, 4)
+  notes              String?  @db.VarChar(500)
+  status             String   @default("submitted") // "submitted" | "verified"
+  otpCode            String?  @db.VarChar(10)
+  createdAt          DateTime @default(now())
+
+  tenant   Tenant   @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  location Location @relation(fields: [locationId], references: [id], onDelete: Cascade)
+  cashier  User     @relation("CashUpCashier", fields: [cashierId], references: [id])
+
+  @@unique([tenantId, locationId, date])
+  @@map("eod_cash_ups")
+}
